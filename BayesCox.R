@@ -132,7 +132,7 @@ BayesCox <- function(df, time = "time", event = "event",
                      K = ceiling((dim(df)[1] / log(dim(df)[1]))^(1/2)),
                      time.max = max(df$time), alpha = 0.05,
                      N = 1000, alpha.dep = 1, alpha0.dep = 1.5, beta0.dep = 1,
-                     alpha.indep = 1.5, beta.indep = 1, theta.prop.sd = NULL,
+                     alpha.indep = 1.5, beta.indep = 1, theta.prop.var = NULL,
                      surv.factor = 10, surv.epsilon = 0.0000000001,
                      theta.int = NULL, lambda.int = NULL, z = NULL, 
                      burnin = NULL){
@@ -140,12 +140,20 @@ BayesCox <- function(df, time = "time", event = "event",
   # prior = match.arg(prior)
   
   # prior <- "Independent"
-  # K <- ceiling((dim(df)[1] / log(dim(df)[1]))^(2/3))
+  # K <- ceiling((dim(df)[1] / log(dim(df)[1]))^(1/2))
   # time.max = max(df$time)
-  # N <- 5000
+  # N <- 10000
+  # alpha.dep <- 1
+  # alpha0.dep <- 1.5
+  # beta0.dep <- 1
   # alpha.indep = 1.5
   # beta.indep = 1
-  
+  # theta.int <- NULL
+  # theta.prop.var <- NULL
+  # lambda.int <- NULL
+  # burnin <- NULL
+  # alpha <- 0.05
+  # 
   if (is.vector(df$trt) == T) {
     p <- 1
   } else {
@@ -156,6 +164,7 @@ BayesCox <- function(df, time = "time", event = "event",
   if (is.null(theta.int) == T) {
     model <- coxph(Surv(eventtime, status) ~ trt, data=df)
     theta.int <- model$coefficients # frequentist estimator
+    theta.var <- model$var
     if (p == 1) {
       exp.reg <- c(exp(df$trt * theta.int))
     } else {
@@ -163,8 +172,9 @@ BayesCox <- function(df, time = "time", event = "event",
     }
   } 
   
-  if (is.null(theta.prop.sd) == T){
-    theta.prop.sd <- sqrt(model$var)
+  if (is.null(theta.prop.var) == T){
+    # theta.prop.var <- diag(rep(0.1, 5))
+    theta.prop.var <- theta.var * 2
   }
   
   if (is.null(lambda.int) == T) {
@@ -199,12 +209,12 @@ BayesCox <- function(df, time = "time", event = "event",
   
   if(prior == "Dependent"){
     post.samples <- SamplePosteriorDepGamma(fail, exp, df, theta.int, lambda.int,
-                                            p, N, alpha.dep, alpha0.dep, beta0.dep, theta.prop.sd)
+                                            p, N, alpha.dep, alpha0.dep, beta0.dep, theta.prop.var)
   } #end Dependent
 
   if(prior == "Independent"){
     post.samples <- SamplePosteriorIndepGamma(fail, exp, df, theta.int, p,
-                                              N, alpha.indep, beta.indep, theta.prop.sd)
+                                              N, alpha.indep, beta.indep, theta.prop.var)
   }
   
   if (is.null(burnin) == T) {
@@ -220,11 +230,17 @@ BayesCox <- function(df, time = "time", event = "event",
   
   # calculate quantiles
   # theta
-  theta.pm <- apply(as.matrix(theta.samples), 2, mean)
-  theta.lq <- quantile(theta.samples, probs = 0.025)
-  theta.uq <- quantile(theta.samples, probs = 0.975)
-  theta.radius <- RadiusCredibleSet(as.matrix(theta.samples), theta.pm, alpha)
-
+  if (p > 1) {
+    theta.pm <- apply(theta.samples, 2, mean)
+    theta.lq <- apply(theta.samples, 2, quantile, probs = 0.025)
+    theta.uq <- apply(theta.samples, 2, quantile, probs = 0.975)
+    theta.radius <- RadiusCredibleSet(theta.samples, theta.pm, alpha)
+  } else {
+    theta.pm <- apply(as.matrix(theta.samples), 2, mean)
+    theta.lq <- quantile(theta.samples, probs = 0.025)
+    theta.uq <- quantile(theta.samples, probs = 0.975)
+    theta.radius <- RadiusCredibleSet(as.matrix(theta.samples), theta.pm, alpha)
+  }
   
   #baseline cumulative hazard function
   bs.haz.pm <- apply(bsline.haz.samples, 2, mean)
@@ -239,11 +255,19 @@ BayesCox <- function(df, time = "time", event = "event",
   bs.cumhaz.ub <- bs.cumhaz.pm + bs.cumhaz.radius
 
   
-  if (is.null(z) == T) {z <- mean(df$trt)}
+
   #conditional cumulative hazard
-  cond.cumhaz.samples <- 
-    t(sapply(1:dim(bs.cumhaz)[1], 
-            FUN = function(j) {bs.cumhaz[j, ] * exp(c(theta.samples[j,] %*% z))}))
+  if (p > 1) {
+    if (is.null(z) == T) {z <- colMeans(df$trt)}
+    cond.cumhaz.samples <- 
+      t(sapply(1:dim(bs.cumhaz)[1], 
+               FUN = function(j) {bs.cumhaz[j, ] * exp(c(sum(theta.samples[j,] * z)))}))
+  } else {
+    if (is.null(z) == T) {z <- mean(df$trt)}
+    cond.cumhaz.samples <- 
+      t(sapply(1:dim(bs.cumhaz)[1], 
+               FUN = function(j) {bs.cumhaz[j, ] * exp(c(theta.samples[j,] %*% z))}))
+  }
   cond.cumhaz.pm <- apply(cond.cumhaz.samples, 2, mean)
   cond.cumhaz.radius <- RadiusCredibleSet(cond.cumhaz.samples, bs.cumhaz.pm, 
                                alpha = alpha)
@@ -299,7 +323,11 @@ BayesCox <- function(df, time = "time", event = "event",
                             bs.surv.ub, surv.eval.grid)
   cond.surv.qtl <- data.frame(cond.surv.pm, cond.surv.lq, cond.surv.uq, 
                               cond.surv.lb, cond.surv.ub, surv.eval.grid)
-  z.bar <- mean(df$trt)
+  if (p > 1) {
+    z.bar <- colMeans(df$trt)
+  } else {
+    z.bar <- mean(df$trt)
+  }
   
   return(list(theta.qtl = theta.qtl, bs.cumhaz.qtl = bs.cumhaz.qtl,
               cond.cumhaz.qtl = cond.cumhaz.qtl, bs.surv.qtl = bs.surv.qtl,

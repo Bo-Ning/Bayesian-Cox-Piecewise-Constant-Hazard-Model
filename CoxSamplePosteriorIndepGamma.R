@@ -37,7 +37,7 @@
 #'   height for each interval.
 #' @param beta.indep The rate parameter for the Gamma prior on the histogram
 #'   height for each interval.
-#' @param theta.prop.sd The standard deviation for the proposal density of theta
+#' @param theta.prop.var The standard deviation for the proposal density of theta
 #'   the proposal density is normally distributed centered at the previous draw 
 #'   of theta
 #' @return \item{samples}{A \eqn{N} by \eqn{K} (the number of draws by the
@@ -49,12 +49,16 @@
 
 SamplePosteriorIndepGamma <- 
   function(failures, exposures, df, theta.int, p = 1, N = 1000, 
-           alpha.indep = 1.5, beta.indep = 1, theta.prop.sd = 0.2){
+           alpha.indep = 1.5, beta.indep = 1, theta.prop.var){
     
     K <- length(failures)
     theta.samples <- matrix(0, nrow = N, ncol = p)
     lambda.samples <- matrix(0, nrow = N, ncol = K)
-    exp.reg <- c(exp(df$trt * theta.int))
+    if (p > 1) {
+      exp.reg <- c(exp(df$trt %*% theta.int))
+    } else {
+      exp.reg <- c(exp(df$trt * theta.int))
+    }
     
     # start MCMC
     for (iter in 1:N) {  
@@ -66,8 +70,18 @@ SamplePosteriorIndepGamma <-
       Lambda <- sapply(df$time, FUN = Lambda.at.time.t, lambda = lambda) 
       
       ##### sample theta #########
-      theta.prop <- rnorm(n = 1, mean = theta.int, sd = theta.prop.sd)
-      exp.reg.prop <- c(exp(df$trt * theta.prop))
+      # theta.prop <- rnorm(n = 1, mean = theta.int, sd = theta.prop.var)
+      if (iter == 1) {
+        theta <- theta.int
+      }
+      # theta.prop <- rnorm(n = 1, mean = theta, sd = theta.prop.var)
+      if (p > 1) {
+        theta.prop <- c(rmvnorm(n = 1, mean = theta, sigma = theta.prop.var))
+        exp.reg.prop <- c(exp(df$trt %*% theta.prop))
+      } else {
+        theta.prop <- rnorm(n = 1, mean = theta, sd = sqrt(theta.prop.var))
+        exp.reg.prop <- c(exp(df$trt * theta.prop))
+      }
       
       # update baseline cumulative hazard function
       # data.summary.update <- CoxReshapeData(df = df, exp.reg = exp.reg.prop, lambda = lambda, K = K)
@@ -76,18 +90,15 @@ SamplePosteriorIndepGamma <-
       
       
       # evaluate log posterior
-      if (iter == 1) {
-        MH.logratio <- -sum(Lambda * (exp.reg.prop - exp.reg)) +
-          sum(log((exp.reg.prop/exp.reg)[df$event == 1])) -
-          sum(theta.prop^2/2) + sum(theta.int^2/2) + 
-          sum((theta.prop - theta.int)^2)/(2*theta.prop.sd^2) 
+      if (p > 1) {
+        exp.reg <- c(exp(df$trt %*% theta))
       } else {
-        MH.logratio <- -sum(Lambda * (exp.reg.prop - exp.reg)) + 
-          sum(log((exp.reg.prop/exp.reg)[df$event == 1])) -
-          sum(theta.prop^2/2) + sum(theta^2/2) +
-          sum((theta.prop - theta.int)^2)/(2*theta.prop.sd^2) - 
-          sum((theta - theta.int)^2)/(2*theta.prop.sd^2)
+        exp.reg <- c(exp(df$trt * theta))
       }
+      
+      MH.logratio <- -sum(Lambda * (exp.reg.prop - exp.reg)) +
+        sum(log((exp.reg.prop/exp.reg)[df$event == 1])) -
+        sum(theta.prop^2/2) + sum(theta^2/2)
       # cat(MH.logratio, "\n")
       if(log(runif(1)) < MH.logratio){
         theta <- theta.prop       # accept move with probability min(1,A)

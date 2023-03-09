@@ -54,15 +54,33 @@
 
 SamplePosteriorDepGamma <- 
   function(failures, exposures, df, theta.int, lambda.int,
-           p = 1, N = 1000, alpha.dep = 1, alpha0.dep = 1.5, beta0.dep = 1, 
-           theta.prop.sd = 0.2){
+           p = 1, N = 1000, alpha.dep = 1, alpha0.dep = 1.5, beta0.dep = 1,
+           theta.prop.var){
+    
+    ##################################
+    # failures <- fail
+    # exposures <- exp
+    # df <- df
+    # theta.int <- theta.int
+    # lambda.int <- lambda.int
+    # p <- p
+    # N <- 5000
+    # alpha.dep <- 1
+    # alpha0.dep <- 1.5
+    # beta0.dep <- 1
+    # theta.prop.var <- theta.var * 2
+    ####################################
     
     epsilon <- 0.001 #to prevent an initial 'current' estimate of zero
     K <- length(failures)
     theta.samples <- matrix(0, nrow = N, ncol = p)
     lambda <- rep(0, K)
     lambda.samples <- matrix(0, nrow = N+1, ncol = K)
-    exp.reg <- c(exp(df$trt * theta.int))
+    if (p > 1) {
+      exp.reg <- c(exp(df$trt %*% theta.int))
+    } else {
+      exp.reg <- c(exp(df$trt * theta.int))
+    }
     
     lambda.samples[1, ] <- lambda.int #initialization
 
@@ -97,28 +115,36 @@ SamplePosteriorDepGamma <-
       lambda.samples[iter+1, ] <- lambda
       
       ##### sample theta #########
-      theta.prop <- rnorm(n = 1, mean = theta.int, sd = theta.prop.sd)
-      if (p == 1){
-        exp.reg.prop <- c(exp(df$trt * theta.prop))
-      } else {    
+      # theta.prop <- rnorm(n = 1, mean = theta.int, sd = theta.prop.var)
+      if (iter == 1) {
+        theta <- theta.int
+      }
+      # theta.prop <- rnorm(n = 1, mean = theta, sd = theta.prop.var)
+      if (p > 1) {
+        theta.prop <- c(rmvnorm(n = 1, mean = theta, sigma = theta.prop.var))
         exp.reg.prop <- c(exp(df$trt %*% theta.prop))
+      } else {
+        theta.prop <- rnorm(n = 1, mean = theta, sd = sqrt(theta.prop.var))
+        exp.reg.prop <- c(exp(df$trt * theta.prop))
       }
       
+      # update baseline cumulative hazard function
+      # data.summary.update <- CoxReshapeData(df = df, exp.reg = exp.reg.prop, lambda = lambda, K = K)
+      # failures <- data.summary.update$failures
+      # exposures <- data.summary.update$exposures
+      
+      
       # evaluate log posterior
-      if (iter == 1) {
-        MH.logratio <- -sum(Lambda * (exp.reg.prop - exp.reg)) +
-          sum(log((exp.reg.prop/exp.reg)[df$event == 1])) +
-          sum((theta.prop - theta.int)^2)/(2*theta.prop.sd^2) - 
-          sum((theta.int - theta.int)^2)/(2*theta.prop.sd^2) -
-          sum(theta.prop^2)/2 + sum(theta.int^2)/2
+      if (p > 1) {
+        exp.reg <- c(exp(df$trt %*% theta))
       } else {
-        MH.logratio <- -sum(Lambda * (exp.reg.prop - exp.reg)) + 
-          sum(log((exp.reg.prop/exp.reg)[df$event == 1])) +
-          sum((theta.prop - theta.int)^2)/(2*theta.prop.sd^2) - 
-          sum((theta - theta.int)^2)/(2*theta.prop.sd^2) -
-          sum(theta.prop^2)/2 + sum(theta^2)/2
+        exp.reg <- c(exp(df$trt * theta))
       }
-
+      
+      MH.logratio <- -sum(Lambda * (exp.reg.prop - exp.reg)) +
+        sum(log((exp.reg.prop/exp.reg)[df$event == 1])) -
+        sum(theta.prop^2/2) + sum(theta^2/2)
+      # cat(MH.logratio, "\n")
       if(log(runif(1)) < MH.logratio){
         theta <- theta.prop       # accept move with probability min(1,A)
         exp.reg <- exp.reg.prop

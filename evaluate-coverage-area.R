@@ -1,17 +1,18 @@
 # read file
 rm(list = ls())
-url <- "depAdm200"
-num.hist <- 12
+url <- "depAdmUnif1000"
+num.hist <- 13
+# num.hist <- 7
 
-setwd(paste("~/Desktop/research/BayesianCoxModel/Simulation/simulation-result/result-w-condSurv-beta-quarter/", url, sep = ""))
-# setwd("~/Desktop/Cox-simulation/")
+# setwd(paste("~/Desktop/research/BayesianCoxModel/Simulation/simulation-result/result-w-condSurv-beta-quarter/", url, sep = ""))
+setwd("~/Desktop/chzf/")
 surv.qlt <- read.csv(paste(url,"-bs.surv.qtl.sim.csv",sep=""), header = T)
 bs.surv.pm <- matrix(surv.qlt$bs.surv.pm, num.hist*10, 1000)
 bs.surv.lb <- matrix(surv.qlt$bs.surv.lb, num.hist*10, 1000)
 bs.surv.ub <- matrix(surv.qlt$bs.surv.ub, num.hist*10, 1000)
 surv.grid <- matrix(surv.qlt$surv.eval.grid, num.hist*10, 1000)
 # true survival function 
-hazard.true <- function(t, x, betas, ...){(6*((t + 0.05)^3 - 2*(t + 0.05)^2 + t + 0.05) + 0.7)}
+hazard.true <- function(t, x, betas, ...){sin(t*2*pi)*0.8+1.5}
 cumhaz.true <- Vectorize( function(t){integrate(hazard.true, 0, t)$value} )
 surv.true <- function(t){exp(-integrate(hazard.true, 0, t)$value)}
 
@@ -43,10 +44,11 @@ surv.grid <- matrix(surv.qlt$surv.eval.grid, num.hist*10, 1000)
 z <- read.csv(paste(url,"-z.bar.sim.csv", sep = ""), header = T)
 # calculate confidence band for Bayesian method
 coverage.z <- 0
+beta.true <- c(-0.3, -0.1, 0, 0.1, 0.3)
 area.z <- c()
 for (i in 1:1000) {
   cumhaz.true.val <- sapply(surv.grid[, i], cumhaz.true)
-  cond.surv.true.val <- exp(-cumhaz.true.val*exp(-0.5*z[[i+1]]))
+  cond.surv.true.val <- exp(-cumhaz.true.val*exp(-sum(beta.true*z[[i+1]])))
   lower <- pmax(0, cond.surv.lb[,i])
   upper <- pmin(1, cond.surv.ub[,i])
   diff.lq <- cond.surv.true.val - lower
@@ -61,7 +63,4 @@ for (i in 1:1000) {
 cat("coverage.z = ", coverage.z, ", area.z = ", mean(area.z))
 
 
-plot(surv.grid[, i], lower, type = "l", ylim = c(0, 1))
-lines(surv.grid[, i], upper, type = "l")
-lines(surv.grid[, i], surv.true.val, type = "l", col = "red")
 
